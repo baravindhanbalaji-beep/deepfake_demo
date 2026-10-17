@@ -133,26 +133,37 @@ class SwinTripleFusionNet(nn.Module):
 # -----------------------------------------------------------------------
 # Face Detector — MediaPipe Short-Range (primary) → center-crop (fallback)
 # -----------------------------------------------------------------------
+# Face Detector — MediaPipe Short-Range (primary) → OpenCV Haar Cascade → center-crop (fallback)
+# -----------------------------------------------------------------------
 
-def _load_mediapipe_detector():
+def _load_face_detector():
     """
-    Attempts to load MediaPipe FaceDetection.
-    Returns (detector, True) on success, (None, False) on failure.
-
-    MediaPipe's Short-Range model is optimised for faces within ~2 m of
-    the camera — perfect for selfie/interview-style deepfake videos.
+    Attempts to load MediaPipe FaceDetection or OpenCV Haar Cascade.
+    Returns (detector, detector_type).
     """
     try:
         import mediapipe as mp
-        detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=0,      # 0 = short-range (~2 m), 1 = full-range (~5 m)
-            min_detection_confidence=0.5
-        )
-        print("Face detector: MediaPipe loaded successfully.")
-        return detector, True
+        if hasattr(mp, "solutions") and hasattr(mp.solutions, "face_detection"):
+            detector = mp.solutions.face_detection.FaceDetection(
+                model_selection=0,      # 0 = short-range (~2 m), 1 = full-range (~5 m)
+                min_detection_confidence=0.5
+            )
+            print("Face detector: MediaPipe loaded successfully.")
+            return detector, "mediapipe"
+    except Exception:
+        pass
+
+    try:
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        cascade = cv2.CascadeClassifier(cascade_path)
+        if not cascade.empty():
+            print("Face detector: OpenCV Haar Cascade loaded successfully.")
+            return cascade, "haar"
     except Exception as e:
-        print(f"WARNING: MediaPipe unavailable ({e}). Using center-crop fallback.")
-        return None, False
+        print(f"OpenCV Haar Cascade load error: {e}")
+
+    print("WARNING: Face detector unavailable. Using center-crop fallback.")
+    return None, None
 
 
 def _mediapipe_detect(detector, frame_bgr):
@@ -160,7 +171,6 @@ def _mediapipe_detect(detector, frame_bgr):
     Runs MediaPipe on a BGR frame.
     Returns list of (x, y, w, h) in pixel coordinates, or [].
     """
-    import mediapipe as mp
     h, w = frame_bgr.shape[:2]
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     results = detector.process(rgb)
@@ -187,7 +197,8 @@ class DeepfakeDetector:
         self.model = None
 
         # Load face detector
-        self._mp_detector, self.use_face_detector = _load_mediapipe_detector()
+        self._face_detector, self._detector_type = _load_face_detector()
+        self.use_face_detector = self._detector_type is not None
 
         if checkpoint_path and os.path.isfile(checkpoint_path):
             self.load_model(checkpoint_path)
@@ -207,7 +218,7 @@ class DeepfakeDetector:
 
     def extract_face(self, frame_bgr):
         """
-        1. Run MediaPipe face detection.
+        1. Run face detection (MediaPipe or Haar Cascade).
         2. Pick the largest bounding box.
         3. Expand by 20% margin (captures jawline / boundary seams).
         4. Fallback → centred square crop if no face found.
@@ -216,11 +227,20 @@ class DeepfakeDetector:
         h, w = frame_bgr.shape[:2]
 
         faces = []
-        if self.use_face_detector:
+        if self._detector_type == "mediapipe":
             try:
-                faces = _mediapipe_detect(self._mp_detector, frame_bgr)
+                faces = _mediapipe_detect(self._face_detector, frame_bgr)
             except Exception as e:
-                print(f"Face detection error: {e}")
+                print(f"MediaPipe detection error: {e}")
+        elif self._detector_type == "haar":
+            try:
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                detected = self._face_detector.detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
+                )
+                faces = [(int(x), int(y), int(bw), int(bh)) for (x, y, bw, bh) in detected]
+            except Exception as e:
+                print(f"Haar detection error: {e}")
 
         if faces:
             # Pick largest face by area
@@ -241,6 +261,8 @@ class DeepfakeDetector:
             cy, cx = h // 2, w // 2
             half = min_dim // 2
             face_crop = frame_bgr[cy - half: cy + half, cx - half: cx + half]
+
+        return cv2.resize(face_crop, (256, 256))
 
         return cv2.resize(face_crop, (256, 256))
 
