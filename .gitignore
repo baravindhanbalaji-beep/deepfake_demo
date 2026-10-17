@@ -1,0 +1,89 @@
+# ==============================
+# Python cache and compiled files
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==============================
+# Virtual environments
+# ==============================
+venv/
+env/
+.venv/
+ENV/
+
+# ==============================
+# Trained models and checkpoints
+# ==============================
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.hdf5
+*.keras
+*.onnx
+*.safetensors
+*.pb
+
+# ==============================
+# Datasets and large media files
+# ==============================
+datasets/
+dataset/
+data/
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+
+# ==============================
+# Uploaded videos and extracted frames
+# ==============================
+/static/uploads/*
+!/static/uploads/.gitkeep
+
+# ==============================
+# Logs and temporary files
+# ==============================
+*.log
+logs/
+temp/
+tmp/
+*.tmp
+*.bak
+
+# ==============================
+# Environment variables and secrets
+# ==============================
+.env
+.env.*
+!.env.example
+
+# ==============================
+# Jupyter Notebook
+# ==============================
+.ipynb_checkpoints/
+
+# ==============================
+# IDE and editor settings
+# ==============================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==============================
+# Operating system files
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# Build and distribution files
+# ==============================
+build/
+dist/
+*.egg-info/
