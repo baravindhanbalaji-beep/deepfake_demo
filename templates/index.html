@@ -1,176 +1,235 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deepfake Video Detection Demo | Swin V2 + Texture</title>
-    <!-- Fonts & Tailwind CSS CDN for modern aesthetics -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <meta name="theme-color" content="#ffffff">
+    <title>Deepfake Video Analysis</title>
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-['Inter'] antialiased">
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <a href="/" class="brand">
+                <span class="brand-mark">DF</span>
+                <span>
+                    <span class="brand-name">Video Integrity Lab</span>
+                    <span class="brand-subtitle">Deepfake detection prototype</span>
+                </span>
+            </a>
 
-    <!-- Header Navigation -->
-    <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-xl shadow-lg shadow-blue-500/30">
-                    🛡️
-                </div>
-                <div>
-                    <h1 class="text-lg font-bold tracking-tight text-white">Swin-TexForensics</h1>
-                    <p class="text-xs text-slate-400 font-medium">Swin V2 + LBP + DCT Triple-Fusion</p>
-                </div>
-            </div>
-            
-            <div class="flex items-center space-x-2">
+            <div class="model-status">
+                <span class="status-dot {% if checkpoint_loaded %}active{% else %}inactive{% endif %}"></span>
                 {% if checkpoint_loaded %}
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span> Model Active (GPU/CPU)
-                    </span>
+                    Model ready
                 {% else %}
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                        ⚠️ No Checkpoint Loaded
-                    </span>
+                    Model checkpoint unavailable
                 {% endif %}
             </div>
         </div>
     </header>
 
-    <!-- Main Container -->
-    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-10">
-
-        <!-- Hero Section -->
-        <div class="text-center space-y-3">
-            <div class="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold uppercase tracking-wider">
-                Video-Level Digital Forensics Demo
-            </div>
-            <h2 class="text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
-                Facial Deepfake Video Detection
-            </h2>
-            <p class="text-slate-400 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed">
-                Upload any video file. The system decomposes it into facial frames at 1 FPS, evaluates spatial micro-textures (LBP), frequency anomalies (DCT), and macro-semantics (Swin V2), then aggregates a robust video-level verdict via temporal mean pooling.
+    <main class="page-container">
+        <section class="intro">
+            <p class="eyebrow">PROJECT DEMONSTRATION</p>
+            <h1>Deepfake video analysis</h1>
+            <p class="intro-description">
+                Upload a video to examine sampled facial frames and obtain
+                an authenticity estimate from the trained detection model.
+                This research prototype may produce incorrect predictions.
             </p>
-        </div>
+        </section>
 
-        <!-- Upload & Action Card -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
-            <form id="upload-form" class="space-y-6">
-                <!-- Dropzone -->
-                <div id="dropzone" class="border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950/50 rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-all duration-200">
-                    <input type="file" id="video-input" name="video" accept="video/mp4,video/avi,video/quicktime,video/x-matroska,video/webm" class="hidden">
-                    
-                    <div id="dropzone-prompt" class="space-y-3">
-                        <div class="w-16 h-16 rounded-full bg-blue-600/10 text-blue-400 mx-auto flex items-center justify-center text-3xl">
-                            🎬
-                        </div>
-                        <div class="space-y-1">
-                            <p class="text-base font-semibold text-slate-200">
-                                Click to select or drag and drop video
+        <section class="panel upload-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="section-label">01 / INPUT</p>
+                    <h2>Upload video</h2>
+                </div>
+                <span class="file-limit">Maximum 200 MB</span>
+            </div>
+
+            <form id="upload-form">
+                
+<div class="upload-mode-switch">
+    <button type="button" id="video-mode-btn"
+            class="mode-button active" aria-pressed="true">
+        Upload video
+    </button>
+    <button type="button" id="folder-mode-btn"
+            class="mode-button" aria-pressed="false">
+        Upload image folder
+    </button>
+</div>
+
+<div id="folder-upload-panel" class="folder-upload-panel hidden">
+    <label for="folder-input" class="folder-label">
+        Select a folder containing face-cropped images
+    </label>
+
+    <input
+        type="file"
+        id="folder-input"
+        accept="image/jpeg,image/png,image/webp,image/bmp"
+        webkitdirectory
+        directory
+        multiple
+    >
+
+    <p id="folder-info" class="muted-text">
+        Select a folder containing JPG, PNG, WEBP or BMP images.
+    </p>
+</div>
+
+                <div id="dropzone" class="dropzone"
+                     role="button" tabindex="0"
+                     aria-label="Choose or drop a video file">
+
+                    <input type="file" id="video-input" name="video"
+                           accept="video/mp4,video/avi,video/quicktime,video/x-matroska,video/webm"
+                           class="visually-hidden">
+
+                    <div id="dropzone-prompt" class="dropzone-prompt">
+                        <div class="upload-icon" aria-hidden="true">↑</div>
+                        <div>
+                            <p class="dropzone-title">
+                                Drag and drop a video here
                             </p>
-                            <p class="text-xs text-slate-500">
-                                MP4, AVI, MOV, MKV, or WEBM (Max 200MB)
+                            <p class="muted-text">
+                                or <span class="browse-text">browse files</span>
+                            </p>
+                            <p class="file-formats">
+                                MP4, AVI, MOV, MKV or WEBM
                             </p>
                         </div>
                     </div>
 
-                    <!-- Selected file info -->
-                    <div id="file-info" class="hidden space-y-2">
-                        <div class="text-emerald-400 text-3xl">📹</div>
-                        <p id="file-name" class="text-base font-bold text-white"></p>
-                        <p id="file-size" class="text-xs text-slate-400"></p>
-                        <button type="button" id="remove-file" class="text-xs text-rose-400 hover:underline">Choose a different video</button>
+                    <div id="file-info" class="selected-file hidden">
+                        <div class="file-icon">VIDEO</div>
+                        <div class="selected-file-details">
+                            <p id="file-name" class="selected-file-name"></p>
+                            <p id="file-size" class="muted-text"></p>
+                        </div>
+                        <button type="button" id="remove-file"
+                                class="text-button">Remove</button>
                     </div>
                 </div>
 
-                <!-- Submit Button -->
-                <div class="flex justify-center">
-                    <button type="submit" id="submit-btn" disabled class="px-8 py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 bg-slate-800 text-slate-500 cursor-not-allowed shadow-lg">
-                        Analyze Video Authenticity
+                <div class="upload-actions">
+                    <p id="sampling-hint" class="muted-text">
+                        Up to 30 frames are sampled at approximately 1 FPS.
+                    </p>
+                    <button type="submit" id="submit-btn"
+                            class="primary-button" disabled>
+                        Analyze video
                     </button>
                 </div>
             </form>
-        </div>
+        </section>
 
-        <!-- Progress Spinner (Hidden by default) -->
-        <div id="loading-state" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center space-y-4">
-            <div class="inline-block relative w-16 h-16">
-                <div class="w-16 h-16 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin"></div>
-                <div class="absolute inset-0 flex items-center justify-center text-xl">🔍</div>
+        <section id="loading-state" class="panel loading-panel hidden"
+                 aria-live="polite">
+            <div class="spinner" aria-hidden="true"></div>
+            <div>
+                <h2 id="loading-heading">Analyzing input</h2>
+                <p id="progress-text" class="muted-text">
+                    Extracting sampled frames...
+                </p>
+                <p class="small-note">
+                    Processing time depends on the input size and available hardware.
+                </p>
             </div>
-            <div class="space-y-1">
-                <h3 class="text-lg font-bold text-white" id="progress-text">Decomposing Video at 1 FPS...</h3>
-                <p class="text-xs text-slate-400">Extracting facial crops and computing Swin V2 + LBP + DCT representations</p>
-            </div>
-        </div>
+        </section>
 
-        <!-- Result Dashboard (Hidden by default) -->
-        <div id="results-dashboard" class="hidden space-y-8">
-            
-            <!-- Big Banner -->
-            <div id="verdict-card" class="rounded-2xl p-8 border text-center space-y-4 shadow-2xl transition-all">
-                <div id="verdict-icon" class="text-5xl"></div>
-                <div class="space-y-1">
-                    <p class="text-xs uppercase tracking-widest font-semibold text-slate-300">Video Authenticity Verdict</p>
-                    <h3 id="verdict-text" class="text-3xl sm:text-4xl font-extrabold tracking-tight"></h3>
+        <div id="error-message" class="error-message hidden"
+             role="alert"></div>
+
+        <section id="results-dashboard" class="results-section hidden">
+            <div class="results-heading">
+                <div>
+                    <p class="section-label">02 / ANALYSIS</p>
+                    <h2>Analysis results</h2>
                 </div>
-                
-                <!-- Confidence Bar -->
-                <div class="max-w-md mx-auto space-y-2">
-                    <div class="flex justify-between text-xs font-semibold">
-                        <span class="text-slate-400">Model Confidence</span>
-                        <span id="confidence-text" class="text-white font-bold"></span>
+                <button type="button" id="analyze-another"
+                        class="secondary-button">
+                    Analyze another video
+                </button>
+            </div>
+
+            <section id="verdict-card" class="panel verdict-card">
+                <div class="verdict-details">
+                    <p id="verdict-section-label" class="section-label">PREDICTION SUMMARY</p>
+                    <h3 id="verdict-text">Awaiting result</h3>
+                    <p id="verdict-description" class="muted-text">
+                        The model prediction will appear here.
+                    </p>
+                </div>
+
+                <div class="confidence-section">
+                    <div class="confidence-heading">
+                        <span>Model confidence</span>
+                        <strong id="confidence-text">—</strong>
                     </div>
-                    <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
-                        <div id="confidence-bar" class="h-3 rounded-full transition-all duration-700"></div>
+
+                    <div id="confidence-track" class="confidence-track"
+                         role="progressbar" aria-label="Model confidence"
+                         aria-valuemin="0" aria-valuemax="100"
+                         aria-valuenow="0">
+                        <div id="confidence-bar" class="confidence-bar"></div>
                     </div>
+
+                    <p class="small-note">
+                        Confidence is a model score, not a guarantee.
+                    </p>
                 </div>
+            </section>
+
+            <div class="stats-grid">
+                <article class="stat-card">
+                    <p class="stat-label">Frames analyzed</p>
+                    <p id="total-frames" class="stat-value">—</p>
+                </article>
+
+                <article class="stat-card">
+                    <p class="stat-label">Predicted manipulated</p>
+                    <p id="fake-frames-count" class="stat-value fake-value">—</p>
+                </article>
+
+                <article class="stat-card">
+                    <p class="stat-label">Predicted authentic</p>
+                    <p id="real-frames-count" class="stat-value real-value">—</p>
+                </article>
+
+                <article class="stat-card">
+                    <p class="stat-label">Processing time</p>
+                    <p id="inference-time" class="stat-value">—</p>
+                </article>
             </div>
 
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-                    <p class="text-xs text-slate-400">Frames Analyzed</p>
-                    <p id="total-frames" class="text-2xl font-bold text-white mt-1">-</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-                    <p class="text-xs text-slate-400">Fake Frames Detected</p>
-                    <p id="fake-frames-count" class="text-2xl font-bold text-rose-400 mt-1">-</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-                    <p class="text-xs text-slate-400">Real Frames Detected</p>
-                    <p id="real-frames-count" class="text-2xl font-bold text-emerald-400 mt-1">-</p>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-                    <p class="text-xs text-slate-400">Inference Time</p>
-                    <p id="inference-time" class="text-2xl font-bold text-blue-400 mt-1">-</p>
-                </div>
-            </div>
-
-            <!-- Frame-by-Frame Gallery -->
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-4">
-                <div class="flex items-center justify-between">
+            <section class="panel gallery-panel">
+                <div class="gallery-heading">
                     <div>
-                        <h4 class="text-base font-bold text-white">Frame-by-Frame Breakdown (1 FPS)</h4>
-                        <p class="text-xs text-slate-400">Inspect individual facial crops and their frame-level manipulation probabilities</p>
+                        <p class="section-label">03 / FRAME REVIEW</p>
+                        <h2>Sampled frame results</h2>
+                        <p class="muted-text gallery-description">
+                            Review the extracted face crops and their individual predictions.
+                        </p>
                     </div>
-                    <span class="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full font-medium" id="gallery-count"></span>
+                    <span id="gallery-count" class="frame-count">0 frames</span>
                 </div>
 
-                <div id="frames-gallery" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 pt-2">
-                    <!-- Populated dynamically via JavaScript -->
-                </div>
-            </div>
+                <div id="frames-gallery" class="frames-gallery"></div>
+            </section>
+        </section>
 
-        </div>
-
+        <footer class="page-footer">
+            <span>Deepfake detection capstone project</span>
+            <span>Swin V2 · LBP · DCT</span>
+        </footer>
     </main>
 
-    <footer class="border-t border-slate-900 py-6 text-center text-xs text-slate-500">
-        B.Tech Capstone Project Demo | Swin V2 Vision Transformer & Multi-Scale Textural Descriptors
-    </footer>
-
-    <script src="/static/js/main.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
 </body>
 </html>

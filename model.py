@@ -99,7 +99,7 @@ class SwinTripleFusionNet(nn.Module):
         self.dct_branch = FeatureBranch()
 
         if use_layernorm:
-            # Celeb-DF trained checkpoint architecture
+            # Architecture matching Celeb-DF trained checkpoint
             self.classifier = nn.Sequential(
                 nn.Linear(1024, 256),
                 nn.LayerNorm(256),
@@ -108,7 +108,7 @@ class SwinTripleFusionNet(nn.Module):
                 nn.Linear(256, 2)
             )
         else:
-            # FF++ trained checkpoint architecture
+            # Architecture matching FF++ trained checkpoint
             self.classifier = nn.Sequential(
                 nn.Linear(1024, 256),
                 nn.ReLU(inplace=True),
@@ -131,53 +131,6 @@ class SwinTripleFusionNet(nn.Module):
 
 
 # -----------------------------------------------------------------------
-# Face Detector — MediaPipe Short-Range (primary) → center-crop (fallback)
-# -----------------------------------------------------------------------
-
-def _load_mediapipe_detector():
-    """
-    Attempts to load MediaPipe FaceDetection.
-    Returns (detector, True) on success, (None, False) on failure.
-
-    MediaPipe's Short-Range model is optimised for faces within ~2 m of
-    the camera — perfect for selfie/interview-style deepfake videos.
-    """
-    try:
-        import mediapipe as mp
-        detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=0,      # 0 = short-range (~2 m), 1 = full-range (~5 m)
-            min_detection_confidence=0.5
-        )
-        print("Face detector: MediaPipe loaded successfully.")
-        return detector, True
-    except Exception as e:
-        print(f"WARNING: MediaPipe unavailable ({e}). Using center-crop fallback.")
-        return None, False
-
-
-def _mediapipe_detect(detector, frame_bgr):
-    """
-    Runs MediaPipe on a BGR frame.
-    Returns list of (x, y, w, h) in pixel coordinates, or [].
-    """
-    import mediapipe as mp
-    h, w = frame_bgr.shape[:2]
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    results = detector.process(rgb)
-
-    boxes = []
-    if results.detections:
-        for det in results.detections:
-            bbox = det.location_data.relative_bounding_box
-            x = int(bbox.xmin * w)
-            y = int(bbox.ymin * h)
-            bw = int(bbox.width * w)
-            bh = int(bbox.height * h)
-            boxes.append((x, y, bw, bh))
-    return boxes
-
-
-# -----------------------------------------------------------------------
 # DeepfakeDetector
 # -----------------------------------------------------------------------
 
@@ -186,8 +139,19 @@ class DeepfakeDetector:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
 
-        # Load face detector
-        self._mp_detector, self.use_face_detector = _load_mediapipe_detector()
+        # Initialize MTCNN face detector for focused facial crops
+        try:
+            from facenet_pytorch import MTCNN
+            self.face_detector = MTCNN(
+                keep_all=False,
+                select_largest=True,
+                post_process=False,
+                device=self.device
+            )
+            print(f"Face detector: MTCNN initialized successfully on {self.device}")
+        except Exception as e:
+            self.face_detector = None
+            print(f"Face detector: MTCNN initialization failed ({e}). Using center-crop fallback.")
 
         if checkpoint_path and os.path.isfile(checkpoint_path):
             self.load_model(checkpoint_path)
@@ -203,52 +167,73 @@ class DeepfakeDetector:
         self.model = SwinTripleFusionNet(use_layernorm=use_layernorm).to(self.device)
         self.model.load_state_dict(cleaned, strict=True)
         self.model.eval()
-        print(f"Model loaded (LayerNorm head = {use_layernorm})")
+        print(f"Model loaded successfully (LayerNorm head = {use_layernorm})")
 
     def extract_face(self, frame_bgr):
         """
-        1. Run MediaPipe face detection.
-        2. Pick the largest bounding box.
-        3. Expand by 20% margin (captures jawline / boundary seams).
-        4. Fallback → centred square crop if no face found.
-        5. Resize to 256×256 (the model's expected input resolution).
+        Detects the primary face using MTCNN and crops a focused region
+        with proportional padding (scale=1.4x face size, y_shift=0.05)
+        to capture the full face, jawline, and boundary seams.
+        Resizes to (256, 256). Falls back to centered crop if no face detected.
         """
         h, w = frame_bgr.shape[:2]
 
-        faces = []
-        if self.use_face_detector:
+        if self.face_detector is not None:
             try:
-                faces = _mediapipe_detect(self._mp_detector, frame_bgr)
+                from PIL import Image
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(frame_rgb)
+                boxes, probs = self.face_detector.detect(pil_img)
+
+                if boxes is not None and len(boxes) > 0 and probs[0] is not None and probs[0] > 0.6:
+                    x1, y1, x2, y2 = boxes[0]
+                    fw = x2 - x1
+                    fh = y2 - y1
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+
+                    # 1.28x proportional scaling around face center matching dataset face crops
+                    crop_size = max(fw, fh) * 1.28
+                    half = crop_size / 2.0
+                    scy = cy - fh * 0.02
+
+                    nx1 = int(round(cx - half))
+                    ny1 = int(round(scy - half))
+                    nx2 = int(round(cx + half))
+                    ny2 = int(round(scy + half))
+
+                    # Keep crop in bounds while preserving 1:1 aspect ratio
+                    if nx1 < 0:
+                        nx2 = min(w, nx2 - nx1)
+                        nx1 = 0
+                    if ny1 < 0:
+                        ny2 = min(h, ny2 - ny1)
+                        ny1 = 0
+                    if nx2 > w:
+                        nx1 = max(0, nx1 - (nx2 - w))
+                        nx2 = w
+                    if ny2 > h:
+                        ny1 = max(0, ny1 - (ny2 - h))
+                        ny2 = h
+
+                    if (nx2 - nx1) > 20 and (ny2 - ny1) > 20:
+                        crop = frame_bgr[ny1:ny2, nx1:nx2]
+                        return cv2.resize(crop, (256, 256), interpolation=cv2.INTER_LINEAR)
             except Exception as e:
-                print(f"Face detection error: {e}")
+                pass
 
-        if faces:
-            # Pick largest face by area
-            x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
-
-            # 20% margin expansion — same as training preprocessing
-            margin_x = int(fw * 0.20)
-            margin_y = int(fh * 0.20)
-            x1 = max(0, x - margin_x)
-            y1 = max(0, y - margin_y)
-            x2 = min(w, x + fw + margin_x)
-            y2 = min(h, y + fh + margin_y)
-
-            face_crop = frame_bgr[y1:y2, x1:x2]
-        else:
-            # Fallback: centred square crop
-            min_dim = min(h, w)
-            cy, cx = h // 2, w // 2
-            half = min_dim // 2
-            face_crop = frame_bgr[cy - half: cy + half, cx - half: cx + half]
-
-        return cv2.resize(face_crop, (256, 256))
+        # Fallback: centered square crop
+        min_dim = min(h, w)
+        cy, cx = h // 2, w // 2
+        half = min_dim // 2
+        crop = frame_bgr[cy - half: cy + half, cx - half: cx + half]
+        return cv2.resize(crop, (256, 256), interpolation=cv2.INTER_LINEAR)
 
     @torch.no_grad()
     def predict_frame(self, face_bgr_256):
         """
-        Runs triple-fusion inference on a 256×256 BGR face crop.
-        Returns (real_probability, fake_probability) as floats in [0, 1].
+        Runs triple-fusion inference on a 256x256 BGR face crop.
+        Returns (real_probability, fake_probability) as floats in [0.0, 1.0].
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model(path) first.")
